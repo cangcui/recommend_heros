@@ -25,7 +25,8 @@ object RunRecommender {
     val sc = new SparkContext(conf)
     val sqlContext = new SQLContext(sc)
 
-    val infoDataDir = "/Users/lambdachen/data/game/wangzherongyao/wangzhe_tbHeroInfo_10.217.176.48"
+    //val infoDataDir = "/Users/lambdachen/data/game/wangzherongyao/wangzhe_tbHeroInfo_10.217.176.48"
+    val infoDataDir = "E:\\tmp\\wangzhe_tbHeroInfo_10.217.176.48"
     recommender(sc, sqlContext, infoDataDir)
   }
 
@@ -38,13 +39,14 @@ object RunRecommender {
   private def recommender(sc: SparkContext,
                           sqlContext: SQLContext,
                           infoDataDir: String): Unit ={
-//    val ratings = buildRatings1(sqlContext, infoDataDir)
-//    val Array(trainData, cvData) = ratings.randomSplit(Array(0.8, 0.2))
-//    val allHeroIds = ratings.map{rat => rat.product}.collect().toSet.toSeq
+    val ratings = buildRatings1(sqlContext, infoDataDir)
+    val Array(trainData, cvData) = ratings.randomSplit(Array(0.8, 0.2))
+    val allHeroIds = ratings.map{rat => rat.product}.collect().toSet.toSeq
 
-    val (trainData, cvData) = buildTrainCVData(sqlContext, infoDataDir)
-    val allHeroIds = (trainData.map{rat => rat.product}.collect().toSet ++
-      cvData.map{rat => rat.product}.collect().toSet).toSeq
+//    val (trainData, cvData) = buildTrainCVData(sqlContext, infoDataDir)
+//    val allHeroIds = (trainData.map{rat => rat.product}.collect().toSet ++
+//      cvData.map{rat => rat.product}.collect().toSet).toSeq
+
     val bAllHeroIds = sc.broadcast(allHeroIds)
 
     trainData.cache()
@@ -56,19 +58,13 @@ object RunRecommender {
     trainData.unpersist()
 
     cvData.cache()
-    val (auc, posCount, negCount) = areaUnderCurve(cvData, bAllHeroIds, alsModel.predict)
+    val (auc, posCount, negCount, posPredNum) = areaUnderCurve(cvData, bAllHeroIds, alsModel.predict)
     cvData.unpersist()
-
-//    val onePlayer = cvData.take(1)(0).user
-//    val recommendProducts = alsModel.recommendProducts(onePlayer, 10)
-//    val posItems = cvData.groupBy(r => r.user).filter{case (uid, iterRats) => uid == onePlayer}
-//    println(s"onePlayer: $onePlayer")
-//    println(s"recommendProducts: ${recommendProducts.toSeq}")
-//    println(s"posItems: ${posItems.map(_._2).collect().toSeq}")
 
     println(s"auc: $auc")
     println(s"posCount: $posCount")
     println(s"negCount: $negCount")
+    println(s"posPredNum: $posPredNum")
   }
 
   private def buildTrainCVData(sqlContext: SQLContext,
@@ -84,14 +80,23 @@ object RunRecommender {
     }
     val Array(trainRawData, cvRawData) = rawRDD.randomSplit(Array(0.8, 0.2))
 
+    val trainUids = trainRawData.map(t => getHashedId(t._1)).collect().toSet
+    val cvUids = cvRawData.map(t => getHashedId(t._1)).collect().toSet
+    val interSet = trainUids.intersect(cvUids)
+
     def constructRatings(rawTuples: RDD[(String, mutable.WrappedArray[Long])]) = {
       rawTuples.map{
         case (strId, heroIds) =>
-          val playerRatings = heroIds.map{
-            hid =>
-              Rating(getHashedId(strId), hid.toInt, 1.0)
+          val hashId = getHashedId(strId)
+          if(!interSet.contains(hashId)){
+            val playerRatings = heroIds.map{
+              hid =>
+                Rating(getHashedId(strId), hid.toInt, 1.0)
+            }
+            playerRatings
+          }else{
+            Seq.empty[Rating]
           }
-          playerRatings
       }.flatMap{case list => list.view.map(r => r)}
     }
 
@@ -126,7 +131,7 @@ object RunRecommender {
   }
 
   private def buildRatings1(sqlContext: SQLContext,
-                           infoDataDir: String): RDD[Rating] = {
+                            infoDataDir: String): RDD[Rating] = {
     val infoData = sqlContext.read.parquet(infoDataDir)
     val infoTmpTable = "hero_info_table"
     infoData.registerTempTable(infoTmpTable)
@@ -157,6 +162,9 @@ object RunRecommender {
                              predictFunction: (RDD[(Int, Int)] => RDD[Rating])) = {
     val positiveUserProducts = positiveData.map(r => (r.user, r.product))
     val positivePredictions = predictFunction(positiveUserProducts).groupBy(_.user)
+
+    val positivePredNum = positivePredictions.map(t => t._2.size).collect().sum
+    println(s"positivePredNum: $positivePredNum")
 
     //construct negative heroids for player
     val negativeUserProducts = positiveUserProducts.groupByKey().mapPartitions{
@@ -196,7 +204,20 @@ object RunRecommender {
         correct.toDouble / total.toDouble
     }.mean()
 
-    (meanAUC, positiveUserProducts.count(), negativeUserProducts.count())
+    (meanAUC, positiveUserProducts.count(), negativeUserProducts.count(), positivePredNum)
+  }
+
+  private def computeMSE(positiveData: RDD[Rating],
+                         predictFunction: (RDD[(Int, Int)] => RDD[Rating])) = {
+    val userHeros = positiveData.map{case Rating(user, hero, rate) => (user, hero)}
+    val predictions = predictFunction(userHeros).map(r => ((r.user, r.product), r.rating))
+    val posData = positiveData.map(r => ((r.user, r.product), r.rating))
+    val ratesAndPred = posData.join(predictions).map{
+      case ((user, product), (r1, r2)) =>
+        val err = (r1 - r2)
+        err * err
+    }.mean()
+    ratesAndPred
   }
 
   private def getHashedId(strId: String): Int = {
