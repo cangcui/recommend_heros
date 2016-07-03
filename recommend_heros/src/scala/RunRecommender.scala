@@ -59,16 +59,16 @@ object RunRecommender {
     val (auc, posCount, negCount) = areaUnderCurve(cvData, bAllHeroIds, alsModel.predict)
     cvData.unpersist()
 
-    val onePlayer = cvData.take(1)(0).user
-    val recommendProducts = alsModel.recommendProducts(onePlayer, 10)
-    val posItems = cvData.groupBy(r => r.user).filter{case (uid, iterRats) => uid == onePlayer}
+//    val onePlayer = cvData.take(1)(0).user
+//    val recommendProducts = alsModel.recommendProducts(onePlayer, 10)
+//    val posItems = cvData.groupBy(r => r.user).filter{case (uid, iterRats) => uid == onePlayer}
+//    println(s"onePlayer: $onePlayer")
+//    println(s"recommendProducts: ${recommendProducts.toSeq}")
+//    println(s"posItems: ${posItems.map(_._2).collect().toSeq}")
 
     println(s"auc: $auc")
     println(s"posCount: $posCount")
     println(s"negCount: $negCount")
-    println(s"onePlayer: $onePlayer")
-    println(s"recommendProducts: ${recommendProducts.toSeq}")
-    println(s"posItems: ${posItems.map(_._2).collect().toSeq}")
   }
 
   private def buildTrainCVData(sqlContext: SQLContext,
