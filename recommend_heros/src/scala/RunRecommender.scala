@@ -19,16 +19,18 @@ import scala.util.hashing.{Hashing, MurmurHash3}
 object RunRecommender {
 
   val SEP = "#"
-  val loggerFile = new PrintWriter(new File("run_recommender.log"))
+  var loggerFile: PrintWriter = null 
 
   def main(args: Array[String]): Unit ={
     val conf = new SparkConf().setAppName("recommend heros")
     val sc = new SparkContext(conf)
     val sqlContext = new SQLContext(sc)
 
+    loggerFile = new PrintWriter(new File("run_recommender.log"))
     val infoDataDir = "/Users/lambdachen/data/game/wangzherongyao/wangzhe_tbHeroInfo_10.217.176.48"
     //val infoDataDir = "E:\\tmp\\wangzhe_tbHeroInfo_10.217.176.48"
     recommender(sc, sqlContext, infoDataDir)
+    loggerFile.close()
   }
 
   private def readHeroInfo(sc: SparkContext,
