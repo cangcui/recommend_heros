@@ -19,7 +19,7 @@ import scala.util.hashing.{Hashing, MurmurHash3}
 object RunRecommender {
 
   val SEP = "#"
-  var loggerFile: PrintWriter = null 
+  var loggerFile: PrintWriter = null
 
   def main(args: Array[String]): Unit ={
     val conf = new SparkConf().setAppName("recommend heros")
