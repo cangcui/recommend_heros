@@ -27,8 +27,8 @@ object RunRecommender {
     val sqlContext = new SQLContext(sc)
 
     loggerFile = new PrintWriter(new File("run_recommender.log"))
-    val infoDataDir = "/Users/lambdachen/data/game/wangzherongyao/wangzhe_tbHeroInfo_10.217.176.48"
-    //val infoDataDir = "E:\\tmp\\wangzhe_tbHeroInfo_10.217.176.48"
+//    val infoDataDir = "/Users/lambdachen/data/game/wangzherongyao/wangzhe_tbHeroInfo_10.217.176.48"
+    val infoDataDir = "E:\\tmp\\wangzhe_tbHeroInfo_10.217.176.48"
     recommender(sc, sqlContext, infoDataDir)
     loggerFile.close()
   }
@@ -58,13 +58,13 @@ object RunRecommender {
     val bAllHeroIds = sc.broadcast(allHeroIds)
 
     val rank = 10            //number of features to use
-    val lambda = 1.0
+    val lambda = 1.5
     val alpha = 1.0
     val iterations = 20
     val alsModel = ALS.trainImplicit(trainData, rank, iterations, lambda, alpha)
     loggerFile.write("alsModel computation end")
 
-    val (auc, posCount, negCount, posPredNum) = areaUnderCurve(cvData, bAllHeroIds, alsModel.predict)
+    val (auc, posCount, negCount, posPredNum, negPredNum) = areaUnderCurve(cvData, bAllHeroIds, alsModel.predict)
     loggerFile.write("areaUnderCurve computation end")
 
     val mse = computeMSE(cvData, alsModel.predict)
@@ -76,6 +76,7 @@ object RunRecommender {
     println(s"posCount: $posCount")
     println(s"negCount: $negCount")
     println(s"posPredNum: $posPredNum")
+    println(s"negPredNum: $negPredNum")
     println(s"mse: $mse")
 
     trainData.unpersist()
@@ -169,7 +170,7 @@ object RunRecommender {
   private def areaUnderCurve(cvData: RDD[Rating],
                              bAllHeroIds: Broadcast[Seq[Int]],
                              predictFunction: (RDD[(Int, Int)] => RDD[Rating])) = {
-    val positiveUserProducts = cvData.map(r => (r.user, r.product)).cache()
+    val positiveUserProducts = cvData.map(r => (r.user, r.product))
     val positivePredictions = predictFunction(positiveUserProducts).groupBy(_.user).cache()
 
     //construct negative heroids for player
@@ -192,7 +193,7 @@ object RunRecommender {
             negativeHeros.map(hid => (uid, hid))
         }
       }
-    }.flatMap(t => t).cache()
+    }.flatMap(t => t)
 
     val negativePredictions = predictFunction(negativeUserProducts).groupBy(_.user).cache()
 
@@ -212,14 +213,15 @@ object RunRecommender {
 
     val posUPNum = positiveUserProducts.count()
     val negUPNum = negativeUserProducts.count()
-    val positivePredNum = positivePredictions.map(t => t._2.size).sum()
+    val positivePredNum = positivePredictions.map{case (id, rs) => rs.size}.reduce(_ + _)
+    val negPredNum = negativePredictions.map{case (id, rs) => rs.size}.reduce(_ + _)
 
-    positiveUserProducts.unpersist()
-    negativeUserProducts.unpersist()
+//    positiveUserProducts.unpersist()
+//    negativeUserProducts.unpersist()
     positivePredictions.unpersist()
     negativePredictions.unpersist()
 
-    (meanAUC, posUPNum, negUPNum, positivePredNum)
+    (meanAUC, posUPNum, negUPNum, positivePredNum, negPredNum)
   }
 
   private def computeMSE(positiveData: RDD[Rating],
